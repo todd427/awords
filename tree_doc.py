@@ -1,0 +1,9 @@
+chat_parser.py
+quality_filter.py
+prep_for_embeddings.py
+prep_for_finetune.py
+output/
+    all_chats.txt
+    filtered_all_chats.txt
+    embeddings_ready.jsonl
+    finetune_ready.jsonl
