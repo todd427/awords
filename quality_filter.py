@@ -19,10 +19,13 @@ def filter_messages(input_file, output_file, min_words=10):
 
     good_msgs = [msg.strip() for msg in raw if is_good_message(msg, min_words)]
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, "w", encoding="utf-8") as f:
-        for msg in good_msgs:
-            f.write(msg + "\n\n")
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            for msg in good_msgs:
+                f.write(msg + "\n\n")
 
     print(f"Filtered {len(raw)} → {len(good_msgs)} messages (min_words={min_words})")
     return len(good_msgs)
