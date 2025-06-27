@@ -1,0 +1,3 @@
+cd memory_pipeline/scripts
+./wiki2memory.py "Name Here"
+./memory2qa.py namehere.json
