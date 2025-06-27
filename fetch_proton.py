@@ -9,47 +9,89 @@
 import imaplib
 import email
 import json
-import argparse
-from pathlib import Path
-import getpass
+from email.header import decode_header
+from decouple import config
+import os
 
+# Load configuration from .env
+IMAP_HOST = config("PROTON_IMAP_HOST", default="127.0.0.1")
+IMAP_PORT = config("PROTON_IMAP_PORT", cast=int, default=1143)
+EMAIL_ACCOUNT = config("PROTON_USER")
+EMAIL_PASSWORD = config("PROTON_PASSWORD")
+OUTPUT_FILE = config("PROTON_OUTPUT_FILE", default="proton_sent.json")
 
-from dotenv import load_dotenv
-import argparse
-import imaplib
-import email
-import json
+def decode_mime_words(s):
+    if not s:
+        return ""
+    decoded = decode_header(s)
+    return ''.join(
+        str(t[0], t[1] or 'utf-8') if isinstance(t[0], bytes) else str(t[0])
+        for t in decoded
+    )
 
-# Load .env file automatically (defaults to ".env" in current dir)
-load_dotenv()
+def fetch_sent_emails():
+    try:
+        mail = imaplib.IMAP4(IMAP_HOST, IMAP_PORT)
+        mail.login(EMAIL_ACCOUNT, EMAIL_PASSWORD)
+        mail.select('"Sent"')
 
-def get_creds(args):
-    creds = {
-        "IMAP_HOST": args.imap_host or os.getenv("PROTON_IMAP_HOST", "127.0.0.1"),
-        "IMAP_PORT": args.imap_port or os.getenv("PROTON_IMAP_PORT", "1143"),
-        "USERNAME": args.user or os.getenv("PROTON_USER"),
-        "PASSWORD": args.password or os.getenv("PROTON_PASSWORD"),
-    }
+        result, data = mail.search(None, "ALL")
+        if result != "OK":
+            print("❌ Failed to search mailbox.")
+            return []
 
-    # Fallback to prompt if not found
-    if not creds["USERNAME"]:
-        creds["USERNAME"] = input("ProtonMail username: ")
-    if not creds["PASSWORD"]:
-        import getpass
-        creds["PASSWORD"] = getpass.getpass("ProtonMail password: ")
+        message_ids = data[0].split()
+        messages = []
 
-    return creds
+        for num in message_ids:
+            result, data = mail.fetch(num, "(RFC822)")
+            if result != "OK":
+                continue
 
-# ... [rest of your script, using get_creds as before] ...
-ment("--imap-port", type=str, default=None, help="IMAP port (default 1143)")
-    parser.add_argument("--output", type=str, default="proton_sent.json", help="Output JSON path")
-    parser.add_argument("--folder", type=str, default="Sent", help="IMAP folder to fetch from")
-    parser.add_argument("--limit", type=int, default=500, help="Max number of emails to fetch")
-    parser.add_argument("--dry-run", action="store_true", help="Only show subjects, don't save")
+            raw_email = data[0][1]
+            msg = email.message_from_bytes(raw_email)
 
-    args = parser.parse_args()
-    creds = get_creds(args)
-    messages = fetch_sent_emails(creds, folder=args.folder, dry_run=args.dry_run, limit=args.limit)
+            subject = decode_mime_words(msg.get("Subject", ""))
+            date = msg.get("Date")
+            from_ = decode_mime_words(msg.get("From", ""))
+            to = decode_mime_words(msg.get("To", ""))
 
-    if not args.dry_run:
-        save_to_json(messages, args.output)
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        charset = part.get_content_charset() or "utf-8"
+                        body = part.get_payload(decode=True).decode(charset, errors="replace")
+                        break
+            else:
+                charset = msg.get_content_charset() or "utf-8"
+                body = msg.get_payload(decode=True).decode(charset, errors="replace")
+
+            messages.append({
+                "subject": subject,
+                "date": date,
+                "from": from_,
+                "to": to,
+                "body": body.strip(),
+            })
+
+        mail.logout()
+        return messages
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return []
+
+def main():
+    print("📨 Connecting to Proton Mail Bridge IMAP...")
+    messages = fetch_sent_emails()
+
+    if messages:
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            json.dump(messages, f, indent=2, ensure_ascii=False)
+        print(f"✅ Saved {len(messages)} messages to {OUTPUT_FILE}")
+    else:
+        print("⚠️ No messages found or connection failed.")
+
+if __name__ == "__main__":
+    main()
